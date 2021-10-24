@@ -1,62 +1,58 @@
 import cv2
 import tensorly as tl
 import numpy as np
+import datetime
 from numba import jit
 from line_profiler import LineProfiler
 
-'''
-矩阵的shrinkage
-'''
-def shrinkage(X, t):
-    # svd矩阵的SVD分解，其中S返回的形式为向量            
-    U, S, Vh = np.linalg.svd(X,full_matrices=False)
+def shrinkage(matrix, t):
+    """矩阵的shrinkage运算
+    Args:
+        matrix: 进行shrinkage运算的矩阵
+        t: 
+
+    Returns:
+        shrinkageMatrix: 进行shrinkage运算以后的矩阵
+    """         
+    U, S, Vh = np.linalg.svd(matrix, full_matrices=False)
     sigm = np.zeros((U.shape[1], Vh.shape[0]))
     for i in range(len(S)):
         sigm[i,i] = np.max(S[i]-t, 0)
     temp = np.dot(U, sigm)
-    shrinkageX = np.dot(temp, Vh)
-    return shrinkageX
+    shrinkageMatrix = np.dot(temp, Vh)
+    return shrinkageMatrix
 
-# def shrinkage(X, t):
-#     U, Sig, VT = np.linalg.svd(X,full_matrices=False)
+def readImg(img_path): 
+    """对图片的数据进行部分缺失处理
+    Args:
+        img_path: 图片路径
 
-#     Temp = np.zeros((U.shape[1], VT.shape[0]))
-#     for i in range(len(Sig)):
-#         Temp[i, i] = Sig[i]  
-#     Sig = Temp
+    Returns:
+        img_tensor_data: 图片的张量形式数据
+    """
+    img_tensor_data = cv2.imread(img_path)
+    return img_tensor_data
 
-#     Sigt = Sig
-#     imSize = Sigt.shape
+def missImg(img_path, miss_percent):
+    """对图片的数据进行部分缺失处理
+    Args:
+        img_path: 图片路径
+        miss_percent: 图片缺失数据百分比，取值为[0,1]
 
-#     for i in range(imSize[0]):
-#         Sigt[i, i] = np.max(Sigt[i, i] - t, 0)
-
-#     temp = np.dot(U, Sigt)
-#     T = np.dot(temp, VT)
-#     return T
-
-'''
-图片的读取，返回值为三维数组即张量
-'''
-def readImg(path): 
-    # 读取图片 （TODO 方法的第二个参数填写）
-    return cv2.imread(path)
-
-'''
-缺失部分图像数据
-'''    
-def missImg():
-    path = "G:\python-code\seaside.jpg"
-    X = readImg(path)  # 原始图像
+    Returns:
+        sparse_tensor: 稀疏张量，只含有元素0和1
+        miss_data_tensor: 缺失部分数据图片的张量形式数据
+    """
+    X = readImg(img_path)  # 原始图像
     imgSize = X.shape 
     size = np.prod([imgSize[0],imgSize[1],imgSize[2]]) # 图片总的元素数据
-    missDataSize = int(np.ceil(np.prod([size,0.3])))  # 缺失元素数量 缺失30%的数据
+    missDataSize = int(np.ceil(np.prod([size, miss_percent])))  # 缺失元素数量
     nums = np.ones(size) # 生成全为1的数组
-    nums[:missDataSize ] = 0  # 缺失的数据填充为0
+    nums[:missDataSize] = 0  # 缺失的数据填充为0
     np.random.shuffle(nums)  # 对只含0,1的数组进行乱序排列
-    T = tl.tensor(nums.reshape(imgSize)) # 生成只含有0,1的张量
-    missDataTensor = T * X
-    return T, missDataTensor
+    sparse_tensor = tl.tensor(nums.reshape(imgSize)) # 生成只含有0,1的张量
+    miss_data_tensor = sparse_tensor * X
+    return sparse_tensor, miss_data_tensor
 
 '''
 生成一个元素全为0的张量
@@ -74,10 +70,18 @@ rho:罚参数
 Y:初始时为0张量
 '''
 def HaLRTC(K,a,X,Z,rho,Y):
+    """HaLRTC算法实现
+    Args:
+        img_path: 图片路径
+        miss_percent: 图片缺失数据百分比，取值为[0,1]
+
+    Returns:
+        X_hat: 通过HaLRTC算法复原的图片张量形式数据
+    """
     Y1=Y2=Y3=Y
-    print("Y is:===================================================")
-    print(Y)
+    start_time = datetime.datetime.now()
     for k in range(K):
+        i_start_time = datetime.datetime.now()
         print('iteration number is:{num}'.format(num=k+1))
         # 1.更新Mi
         M1= tl.fold(shrinkage(tl.unfold(X, mode=0) + tl.unfold(Y1, mode=0) / rho, a[0] / rho), 0, X.shape)  
@@ -89,7 +93,12 @@ def HaLRTC(K,a,X,Z,rho,Y):
         Y1 = Y1-rho*(M1-X_hat)
         Y2 = Y2-rho*(M2-X_hat)
         Y3 = Y3-rho*(M3-X_hat)
-        print('the {num} times iteration ending'.format(num=k+1))
+        i_end_time = datetime.datetime.now()
+        cost = i_end_time - i_start_time 
+        print('the {num} times iteration ending,time cost is:{time} second'.format(num=k+1,time= cost.seconds))
+    
+    end_time = datetime.datetime.now()
+    print("total time cost: {} second".format((end_time - start_time).seconds))
     return X_hat
 
 if __name__=="__main__":
@@ -105,32 +114,39 @@ if __name__=="__main__":
     # 原始图片
     originl_X = readImg(path)
     # X为受损的图片
-    Z, X = missImg()
-    print("zero-one tensor:==================================================")
-    print(Z)
+    Z, X = missImg(path, 0.6)
     imgShape = X.shape
    # 对应alpha
     a = abs(np.random.rand(3, 1))
     a = a / np.sum(a)
-    K = 5 # 迭代次数
+    K = 1 # 迭代次数
    #print(Z)
     rho = 1e-6
     Y = createZeroTensor(X.shape)
     # X_hat为通过算法还原的图片
     X_hat = HaLRTC(K,a,X,Z,rho,Y)
     # 显示对比图
-    im1 = cv2.resize(X, (400, 400))
-    im2 = cv2.resize(X_hat, (400, 400))
-    im3 = cv2.resize(originl_X, (400, 400))
-    imgs =  np.hstack((im1,im2,im3))
+    # im1 = cv2.resize(X, (400, 400))
+    # im2 = cv2.resize(X_hat, (400, 400))
+    # im3 = cv2.resize(originl_X, (400, 400))
+    # imgs =  np.hstack((im1,im2,im3))
     # # 展示多个
     # cv2.imshow("mutil_pic", imgs)
     #hmerge = np.hstack((im1, im2,im3)) #水平拼接
     # vmerge = np.vstack((im1, im2)) #垂直拼接
 
-    cv2.imshow("compare_img", imgs)
+    #cv2.imshow("compare_img", imgs)
     # cv2.imshow("test2", vmerge)
     #cv2.imshow("mutil_pic", imgs)
+    cv2.namedWindow('originl', cv2.WINDOW_NORMAL)
+    # 显示图片
+    cv2.imshow("originl", originl_X.astype(np.uint8))
+    cv2.namedWindow('miss', cv2.WINDOW_NORMAL)
+    # 显示图片
+    cv2.imshow("miss", X.astype(np.uint8))
+    cv2.namedWindow('completion', cv2.WINDOW_NORMAL)
+    # 显示图片
+    cv2.imshow("completion", X_hat.astype(np.uint8))
     cv2.waitKey(0) 
     # cv2.namedWindow('HaLRTC', cv2.WINDOW_NORMAL)
     # # 显示图片
