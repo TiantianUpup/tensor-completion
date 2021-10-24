@@ -5,6 +5,7 @@
 ### 开发环境
 - Python 3.6.1 
 - Anaconda 4.4.0 (64-bit)
+- OpenCV2 4.5.3
 
 ### 算法说明
 #### HaLRTC
